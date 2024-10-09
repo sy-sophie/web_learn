@@ -71,6 +71,10 @@ function test () {
   console.log('Nonce 的值：', nonce);
   console.log('时间差为：', endDate - startDate, '毫秒');
 
+  return { hash: result.hash, nonce: nonce };
 }
-// powVerify('sy-sophie', )
-test()
+test();
+
+module.exports = {
+  test,
+}
