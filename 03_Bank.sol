@@ -2,9 +2,9 @@
 
 pragma solidity >=0.8.20;
 // 1. 现有一个管理员，address owner
-// 2. 所有的人address 都可以 存到 owner 中
-//     2.1 存的过程要记录到balances，用于计算前3名用户的余额accounts
-// 3. 管理员可以取出所有的钱
+// 2. 所有的人address 都可以 存到 balances 中
+//     2.1 存的过程要记录到balances，用于计算前3名用户的余额TopUser
+// 3. 管理员 owner 可以取出所有的钱
 
 contract Bank {
     address public immutable owner;
