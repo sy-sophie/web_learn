@@ -7,7 +7,7 @@ interface IBank {
 }
 
 contract Bank is IBank {
-    address public immutable owner;
+    address public owner;
     mapping(address => uint) public balances;
     struct TopUser {
         address user;
@@ -47,11 +47,6 @@ contract Bank is IBank {
 
 contract BigBank is Bank {
     error EtherInsufficient();
-    address public admin;
-
-    constructor() {
-        admin = msg.sender;
-    }
 
     modifier depositAmount() { // 要求存款金额 > 0.001 ether
         if (msg.value < 0.001 ether) { // 1 ether = 10 ^ 18
@@ -67,9 +62,9 @@ contract BigBank is Bank {
     }
 
     function transferAdmin(address newAdmin) external {
-        require(msg.sender == admin, "Only the current admin can transfer admin rights.");
+        require(msg.sender == owner, "Only the current admin can transfer admin rights.");
         require(newAdmin != address(0), "New admin cannot be the zero address.");
-        admin = newAdmin; // 更新管理员地址
+        owner = newAdmin; // 更新管理员地址
     }
 
 }
@@ -82,9 +77,14 @@ contract Admin {
         adminOwner = msg.sender;
     }
 
+    receive() external payable { } // 接收ETH
+
     function adminWithdraw(IBank bankAddress) public{
         require(msg.sender == adminOwner, "Only the owner can withdraw.");
         try IBank(bankAddress).bankWithdraw() returns (uint bankBalance){
+            // 使用call方法，将提取的余额转入到Admin合约地址
+            (bool success, ) = payable(address(this)).call{value: bankBalance}("");
+            require(success, "Transfer to Admin contract failed.");
             totalWithdrawn += bankBalance;
         } catch {
             revert("Withdraw failed");
@@ -118,9 +118,5 @@ contract Admin {
 //   用户3: 0x78731D3Ca6b7E34aC0F824c42a7cC18A495cabaB，value: 3 ether
 
 // 6. 管理员提取资金。
-//   - 在 Admin 合约中调用 adminWithdraw(address BigBank: 0x8207D032322052AfB9Bf1463aF87fd0c0097EDDE)，输入 BigBank 合约地址
+//   - 在 Admin 合约中调用 adminWithdraw(address BigBank: 0x26b989b9525Bb775C8DEDf70FeE40C36B397CE67)，输入 BigBank 合约地址
 //   totalWithdrawn: 6 ether
-
-
-
-
