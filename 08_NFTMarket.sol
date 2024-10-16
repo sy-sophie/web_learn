@@ -4,17 +4,6 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
-interface IERC777Recipient {
-    function tokensReceived( // 允许 接收者 在接收代币时执行自定义逻辑 这个函数在 ERC777 代币合约调用 send 或 transfer 后自动触发，确保代币接收者可以处理接收到的代币
-        address operator, // 代币持有者地址 || 操作的代理方
-        address from,
-        address to,
-        uint256 amount,
-        bytes calldata userData, // 用户提供的附加数据
-        bytes calldata operatorData // 操作员提供的附加数据
-    ) external;
-}
-
 contract BaseERC20 {
     string public name;
     string public symbol;
@@ -90,11 +79,29 @@ contract BaseERC20 {
 }
 
 
+interface IERC777Recipient {
+    function tokensReceived( // 允许 接收者 在接收代币时执行自定义逻辑 这个函数在 ERC777 代币合约调用 send 或 transfer 后自动触发，确保代币接收者可以处理接收到的代币
+        address operator, // 代币持有者地址 || 操作的代理方
+        address from,
+        address to,
+        uint256 amount,
+        bytes calldata userData, // 用户提供的附加数据
+        bytes calldata operatorData // 操作员提供的附加数据
+    ) external;
+}
 
-contract NFTMarket {
+
+contract NFTMarket is IERC777Recipient {
+    // NFT contract
+    IERC721 public nftContract;
+
     struct Listing {
         address seller;
         uint256 price;
+    }
+
+    constructor(IERC721 _nftContract) {
+        nftContract = _nftContract;
     }
 
     mapping(uint256 => Listing) public listings;
@@ -114,11 +121,34 @@ contract NFTMarket {
         Listing memory listing = listings[tokenId];
         require(amount >= listing.price, "Insufficient funds");
 
-        // 调用 BaseERC20 合约的 transferWithCallback 函数
-        BaseERC20(erc20Token).transferWithCallback(listing.seller, amount);
+        BaseERC20(erc20Token).transferFrom(msg.sender, listing.seller, listing.price);
 
-        IERC721(nftContract).transferFrom(address(this), msg.sender, tokenId);
+        // @param  address(this) 当前合约的地址，表示要转移的NFT所在地址
+        // @param  msg.sender,   NFT被转移到哪个地址
+        // @param  tokenId       哪一个NFT
+        IERC721(nftContract).safeTransferFrom(address(this), msg.sender, tokenId);
 
         delete listings[tokenId]; // Remove the listing after purchase
+    }
+
+    function tokensReceived( // 允许 接收者 在接收代币时执行自定义逻辑 这个函数在 ERC777 代币合约调用 send 或 transfer 后自动触发，确保代币接收者可以处理接收到的代币
+        address operator, // 代币持有者地址 || 操作的代理方
+        address from,
+        address to,
+        uint256 amount,
+        bytes calldata userData, // 用户提供的附加数据
+        bytes calldata operatorData // 操作员提供的附加数据
+    ) external {
+        uint256 tokenId = abi.decode(userData, (uint256));  // The tokenId of the NFT to buy
+        Listing memory listing = listings[tokenId];
+
+        require(listing.price > 0, "NFT is not listed for sale");
+        require(amount == listing.price, "Incorrect payment amount");
+
+        nftContract.safeTransferFrom(address(this), from, tokenId);
+        BaseERC20(to).transfer(from, amount);
+
+        delete listings[tokenId];
+
     }
 }
