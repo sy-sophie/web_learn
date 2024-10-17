@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {BaseERC20} from "./NFTMarket/BaseERC20.sol";
 
 contract BaseERC20 {
     string public name;
@@ -68,14 +69,15 @@ contract BaseERC20 {
         }
         return  size > 0; // 如果代码大小大于0，则为合约地址
     }
-    function transferWithCallback(address recipient, uint amount) external returns (bool)  {
+    function transferWithCallback(address recipient, uint amount, bytes calldata data) external returns (bool)  {
         transferFrom(msg.sender, recipient, amount);
         // 检查接收者是否为合约
         if(isContract(recipient)) {
-            IERC777Recipient(recipient).tokensReceived(msg.sender, msg.sender, recipient, amount, "", "");
+            IERC777Recipient(recipient).tokensReceived(msg.sender,  msg.sender, recipient, amount,data, "" );
         }
         return true;
     }
+    // recipient 指向 NFTMarket合约 时，会调用 NFTMarket 的 tokensReceived
 }
 
 
@@ -92,7 +94,7 @@ interface IERC777Recipient {
 
 
 contract NFTMarket is IERC777Recipient {
-    // NFT contract
+    BaseERC20 public paymentToken;
     IERC721 public nftContract;
 
     struct Listing {
@@ -100,55 +102,52 @@ contract NFTMarket is IERC777Recipient {
         uint256 price;
     }
 
-    constructor(IERC721 _nftContract) {
+    constructor(IERC721 _nftContract, BaseERC20 _paymentToken) {
         nftContract = _nftContract;
+        paymentToken = _paymentToken;
     }
 
     mapping(uint256 => Listing) public listings;
+
     // @param nftContract  NFT 合约的地址
     // @param tokenId      要出售的 NFT 的 ID
-    // @param price        NFT 上架的价格，单位是 ERC20 代币
-    function listNFT(address nftContract, uint256 tokenId, uint256 price) public {
-        IERC721(nftContract).transferFrom(msg.sender, address(this), tokenId);
+    function listNFT(uint256 tokenId, uint256 price) public {
+        require(nftContract.ownerOf(tokenId) == msg.sender,"Not the owner");
+        // msg.sender（即 NFT 的拥有者）是否已经将所有的 NFT 批量授权给当前合约 (address(this)) || 检查指定的 NFT（tokenId）是否单独授权给当前合约 (address(this)) 操作。
+         require(nftContract.isApprovedForAll(msg.sender, address(this)) || nftContract.getApproved(tokenId) == address(this), "NFT not approved");
+
         listings[tokenId] = Listing(msg.sender, price);
     }
 
-    // @param nftContract   NFT 合约的地址
     // @param tokenId       要购买的 NFT 的 ID
     // @param amount        买家支付的代币数量
     // @param erc20Token    用于支付的 ERC20 代币的合约地址
-    function buyNFT(address nftContract, uint256 tokenId, uint256 amount, address erc20Token) public {
+    function buyNFT(uint256 tokenId, uint256 amount) public {
         Listing memory listing = listings[tokenId];
         require(amount >= listing.price, "Insufficient funds");
 
-        BaseERC20(erc20Token).transferFrom(msg.sender, listing.seller, listing.price);
-
-        // @param  address(this) 当前合约的地址，表示要转移的NFT所在地址
-        // @param  msg.sender,   NFT被转移到哪个地址
-        // @param  tokenId       哪一个NFT
-        IERC721(nftContract).safeTransferFrom(address(this), msg.sender, tokenId);
+        paymentToken.transferFrom(msg.sender, listing.seller, listing.price);
+        nftContract.transferFrom(listing.seller, msg.sender, tokenId);
 
         delete listings[tokenId]; // Remove the listing after purchase
     }
 
     function tokensReceived( // 允许 接收者 在接收代币时执行自定义逻辑 这个函数在 ERC777 代币合约调用 send 或 transfer 后自动触发，确保代币接收者可以处理接收到的代币
-        address operator, // 代币持有者地址 || 操作的代理方
         address from,
-        address to,
         uint256 amount,
-        bytes calldata userData, // 用户提供的附加数据
-        bytes calldata operatorData // 操作员提供的附加数据
+        bytes calldata data // 操作员提供的附加数据
     ) external {
-        uint256 tokenId = abi.decode(userData, (uint256));  // The tokenId of the NFT to buy
+        require(msg.sender == address(paymentToken), "Invalid sender");
+
+        uint256 tokenId = abi.decode(data, (uint256));
         Listing memory listing = listings[tokenId];
 
-        require(listing.price > 0, "NFT is not listed for sale");
-        require(amount == listing.price, "Incorrect payment amount");
+        require(listing.price > 0, "This NFT is not for sale.");
+        require(amount >= listing.price, "Insufficient funds");
 
-        nftContract.safeTransferFrom(address(this), from, tokenId);
-        BaseERC20(to).transfer(from, amount);
+        paymentToken.transferFrom(from, listing.seller, listing.price);
+        nftContract.safeTransferFrom(listing.seller, from, tokenId);
 
         delete listings[tokenId];
-
     }
 }
