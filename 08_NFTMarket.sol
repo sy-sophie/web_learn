@@ -3,7 +3,6 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import {BaseERC20} from "./NFTMarket/BaseERC20.sol";
 
 contract BaseERC20 {
     string public name;
@@ -114,7 +113,7 @@ contract NFTMarket is IERC777Recipient {
     function listNFT(uint256 tokenId, uint256 price) public {
         require(nftContract.ownerOf(tokenId) == msg.sender,"Not the owner");
         // msg.sender（即 NFT 的拥有者）是否已经将所有的 NFT 批量授权给当前合约 (address(this)) || 检查指定的 NFT（tokenId）是否单独授权给当前合约 (address(this)) 操作。
-         require(nftContract.isApprovedForAll(msg.sender, address(this)) || nftContract.getApproved(tokenId) == address(this), "NFT not approved");
+        require(nftContract.isApprovedForAll(msg.sender, address(this)) || nftContract.getApproved(tokenId) == address(this), "NFT not approved");
 
         listings[tokenId] = Listing(msg.sender, price);
     }
@@ -132,14 +131,17 @@ contract NFTMarket is IERC777Recipient {
         delete listings[tokenId]; // Remove the listing after purchase
     }
 
-    function tokensReceived( // 允许 接收者 在接收代币时执行自定义逻辑 这个函数在 ERC777 代币合约调用 send 或 transfer 后自动触发，确保代币接收者可以处理接收到的代币
+    function tokensReceived(
+        address operator,
         address from,
+        address to,
         uint256 amount,
-        bytes calldata data // 操作员提供的附加数据
-    ) external {
+        bytes calldata userData,
+        bytes calldata operatorData
+    ) external override {
         require(msg.sender == address(paymentToken), "Invalid sender");
 
-        uint256 tokenId = abi.decode(data, (uint256));
+        uint256 tokenId = abi.decode(userData, (uint256));
         Listing memory listing = listings[tokenId];
 
         require(listing.price > 0, "This NFT is not for sale.");
@@ -150,4 +152,5 @@ contract NFTMarket is IERC777Recipient {
 
         delete listings[tokenId];
     }
+
 }
